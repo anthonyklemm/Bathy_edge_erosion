@@ -13,3 +13,5 @@ Combine the eroded large gaps mask with the eroded edges mask to create a combin
 Apply the combined mask to the input raster data, replacing the eroded edges with NoDataValue pixels.
 Save the modified raster data to a new GeoTIFF file with LZW compression.
 This script is designed to be easily customizable by adjusting parameters such as the minimum gap size. The output raster will have the edges of large gaps eroded by one pixel, while preserving the smaller gaps, thus reducing the potential for edge fliers in the bathymetry data.
+
+https://user-images.githubusercontent.com/76973843/227607393-d4475faa-3ac1-4d71-9602-fc9ca31d4f77.jpg
