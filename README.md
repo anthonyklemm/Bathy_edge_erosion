@@ -14,4 +14,6 @@ Apply the combined mask to the input raster data, replacing the eroded edges wit
 Save the modified raster data to a new GeoTIFF file with LZW compression.
 This script is designed to be easily customizable by adjusting parameters such as the minimum gap size. The output raster will have the edges of large gaps eroded by one pixel, while preserving the smaller gaps, thus reducing the potential for edge fliers in the bathymetry data.
 
+In the image below, the white color is the eroded output raster, and the red raster is the original input raster. Notice how small interior gaps are not eroded in the output raster.
+
 ![raster erosion](https://user-images.githubusercontent.com/76973843/227607674-3b667641-2c5a-4adf-8c07-d16e6b72affa.jpg)
