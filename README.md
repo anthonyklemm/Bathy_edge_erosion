@@ -5,7 +5,7 @@ This script processes bathymetry rasters created using the CUBE algorithm from M
 
 1. Read the input bathymetry raster (at this point, it only works with geotiffs), identifying the NoDataValue pixels.
 
-2. Create a binary mask based on the NoDataValue pixels, where 255 represents valid data and 0 represents NoDataValue pixels.
+2. Create a binary mask based on the NoDataValue pixels.
 
 3. Dilate the binary mask and subtract it from the original binary mask, leaving only the eroded edges.
 
