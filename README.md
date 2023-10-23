@@ -1,4 +1,4 @@
-# Erode Raster
+# Erode Raster Edges
 
 A Python script that erodes one grid cell on all edges but retains small interior gaps. This is particularly useful for removing edge fliers in bathymetric grids generated using the CUBE algorithm from Multibeam Echosounder (MBES) data.
 
