@@ -1,9 +1,10 @@
-
 import tkinter as tk
 from tkinter import filedialog
 from tkinter import ttk
 from erode_bag_functions import process_bag
 import os
+import time
+
 
 def browse_input_bag():
     input_bag = filedialog.askopenfilename(filetypes=[("BAG files", "*.bag")])
@@ -14,11 +15,17 @@ def browse_output_dir():
     output_dir_var.set(output_dir)
     
 def process():
+    start_time = time.time()
+    print('***commencing erosion process***')
+    print('***NOTE: disregard warnings about cornerPoints or SingleCRS***')
     input_bag = input_bag_var.get()
     output_dir = output_dir_var.get()
     process_bag(input_bag, output_dir, progress, root)
     status_label['text'] = "Processing completed successfully!"
-    print("Processing completed successfully!")
+    print("***Processing completed successfully!***")
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print(f"The function took {execution_time:.2f} seconds to run.")
     os.startfile(output_dir)
 
 def create_widgets(root):

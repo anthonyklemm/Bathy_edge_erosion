@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """
 Created on Tue May  2 15:40:29 2023
@@ -11,144 +12,114 @@ from skimage import morphology
 from skimage.measure import label, regionprops
 import h5py
 import shutil
+import time
+
+start_time = time.time()
 
 def bag_to_elevation_geotiff(input_bag, output_dir):
     dataset = gdal.Open(input_bag, gdal.GA_ReadOnly)
-    gdal.Translate(output_dir +'/'+ 'full_elevation_tiff.tif', dataset, bandList=[1])
+    options = ["-co", "COMPRESS=LZW"]
+    gdal.Translate(output_dir +'/'+ 'full_elevation_tiff.tif', dataset, bandList=[1], options=options)
     full_elevation_tiff = output_dir +'/'+ 'full_elevation_tiff.tif'
     dataset = None
     return full_elevation_tiff
 
 def bag_to_uncertainty_geotiff(input_bag, output_dir):
     dataset = gdal.Open(input_bag, gdal.GA_ReadOnly)
-    gdal.Translate(output_dir +'/'+ 'full_uncertainty_tiff.tif', dataset, bandList=[2])
+    options = ["-co", "COMPRESS=LZW"]
+    gdal.Translate(output_dir +'/'+ 'full_uncertainty_tiff.tif', dataset, bandList=[2], options=options)
     full_uncertainty_tiff = output_dir +'/'+ 'full_uncertainty_tiff.tif'
     dataset = None
     return full_uncertainty_tiff
 
-def erode_outer_edge_elevation(input_bag, output_dir, min_gap_size=6):
+
+def erode_outer_edge_elevation_chunked(input_bag, output_dir, chunk_height=1000, overlap_factor=0.1, min_gap_size=6):
     full_elevation_tiff = bag_to_elevation_geotiff(input_bag, output_dir)
     dataset = gdal.Open(full_elevation_tiff)
     band = dataset.GetRasterBand(1)
-
-    # Read the raster data as a NumPy array
-    raster_data = band.ReadAsArray()
-
-    # Create a binary mask based on the NoDataValue
-    no_data_value = band.GetNoDataValue()
-    binary_mask = np.where(raster_data != no_data_value, 1, 0).astype(np.uint8)
-
-    # Invert binary mask to focus on gaps
-    inverted_binary_mask = np.where(binary_mask == 0, 1, 0).astype(np.uint8)
-
-    # Label connected components in the inverted binary mask
-    labeled_mask = label(inverted_binary_mask)
-
-    # Create masks for small and large gaps
-    small_gaps_mask = np.zeros_like(binary_mask)
-    large_gaps_mask = np.zeros_like(binary_mask)
-
-    for region in regionprops(labeled_mask):
-        region_mask = (labeled_mask == region.label)
-        if region.area < min_gap_size:
-            small_gaps_mask[region_mask] = 1
-        else:
-            large_gaps_mask[region_mask] = 1
-
-    # Dilate large gaps by 2 pixels
-    dilated_large_gaps_mask = morphology.binary_dilation(large_gaps_mask, morphology.square(5))
-
-    # Erode all edges, including gaps
-    eroded_mask = morphology.binary_erosion(binary_mask, morphology.square(3))
-
-    # Add back in data values from dilated large gaps mask and small gaps mask
-    eroded_raster_data = np.where(eroded_mask == 1, raster_data, no_data_value)
-    eroded_raster_data[~dilated_large_gaps_mask & (eroded_mask == 0)] = raster_data[~dilated_large_gaps_mask & (eroded_mask == 0)]
-    eroded_raster_data[small_gaps_mask == 1] = raster_data[small_gaps_mask == 1]
-
-    # Create a new GeoTIFF file for the eroded raster data
-    driver = gdal.GetDriverByName('GTiff')
-    eroded_elevation_tiff = driver.Create(output_dir +'/'+ 'eroded_elevation_tiff.tif', dataset.RasterXSize, dataset.RasterYSize, 1, band.DataType,
-                                   options=["COMPRESS=LZW", "PREDICTOR=2"])
-
-    # Copy the geotransform and projection from the input raster to the output raster
-    eroded_elevation_tiff.SetGeoTransform(dataset.GetGeoTransform())
-    eroded_elevation_tiff.SetProjection(dataset.GetProjection())
-
-    # Write the eroded raster data to the output file
-    output_band = eroded_elevation_tiff.GetRasterBand(1)
-    output_band.WriteArray(eroded_raster_data)
-
-    # Set the same NoDataValue in the output raster as in the input raster
-    output_band.SetNoDataValue(no_data_value)
-
-    # Close the datasets
-    eroded_elevation_tiff.FlushCache()
-    eroded_elevation_tiff = None
-    dataset = None
-    return output_dir +'/'+ 'eroded_elevation_tiff.tif'
     
-def erode_outer_edge_uncertainty(input_bag, output_dir, min_gap_size=6):
-    full_uncertainty_tiff = bag_to_uncertainty_geotiff(input_bag, output_dir)
-    dataset = gdal.Open(full_uncertainty_tiff)
-    band = dataset.GetRasterBand(1)
-
-    # Read the raster data as a NumPy array
-    raster_data = band.ReadAsArray()
-
-    # Create a binary mask based on the NoDataValue
+    raster_width = dataset.RasterXSize
+    raster_height = dataset.RasterYSize
     no_data_value = band.GetNoDataValue()
-    binary_mask = np.where(raster_data != no_data_value, 1, 0).astype(np.uint8)
+    
+    # Calculate the overlap in terms of pixels
+    overlap_pixels = int(chunk_height * overlap_factor)
+    
+    # Resultant array to store the eroded data
+    eroded_data = np.full((raster_height, raster_width), no_data_value)
+    
+    # Calculate the number of chunks
+    overlap_pixels = int(chunk_height * overlap_factor)
+    num_chunks = max(1, ((raster_height - overlap_pixels - 1) // (chunk_height - overlap_pixels)) + 1)
+    print(f"Number of chunks: {num_chunks}")
+    
+    # Iterate over the raster in chunks
+    for i, start_row in enumerate(range(0, raster_height, chunk_height - overlap_pixels)):
+        if start_row >= raster_height:
+            break
+        end_row = min(start_row + chunk_height, raster_height)
+        print(f"Processing chunk {i + 1} of {num_chunks}...")
+        
+        # Read the chunk data with buffer
+        buffer_size = overlap_pixels
+        buffer_start_row = max(0, start_row - buffer_size)
+        buffer_end_row = min(raster_height, end_row + buffer_size)
+        chunk_data = band.ReadAsArray(0, buffer_start_row, raster_width, buffer_end_row - buffer_start_row)
+        
+        # Create a binary mask based on the NoDataValue
+        binary_mask = np.where(chunk_data != no_data_value, 1, 0).astype(np.uint8)
 
-    # Invert binary mask to focus on gaps
-    inverted_binary_mask = np.where(binary_mask == 0, 1, 0).astype(np.uint8)
+        # Invert binary mask to focus on gaps
+        inverted_binary_mask = np.where(binary_mask == 0, 1, 0).astype(np.uint8)
 
-    # Label connected components in the inverted binary mask
-    labeled_mask = label(inverted_binary_mask)
+        # Label connected components in the inverted binary mask
+        labeled_mask = label(inverted_binary_mask)
 
-    # Create masks for small and large gaps
-    small_gaps_mask = np.zeros_like(binary_mask)
-    large_gaps_mask = np.zeros_like(binary_mask)
+        # Create masks for small and large gaps
+        small_gaps_mask = np.zeros_like(binary_mask)
+        large_gaps_mask = np.zeros_like(binary_mask)
 
-    for region in regionprops(labeled_mask):
-        region_mask = (labeled_mask == region.label)
-        if region.area < min_gap_size:
-            small_gaps_mask[region_mask] = 1
-        else:
-            large_gaps_mask[region_mask] = 1
+        for region in regionprops(labeled_mask):
+            region_mask = (labeled_mask == region.label)
+            if region.area < min_gap_size:
+                small_gaps_mask[region_mask] = 1
+            else:
+                large_gaps_mask[region_mask] = 1
+        
+        # Dilate large gaps
+        dilated_large_gaps_mask = morphology.binary_dilation(large_gaps_mask, morphology.square(5))
 
-    # Dilate large gaps by 2 pixels
-    dilated_large_gaps_mask = morphology.binary_dilation(large_gaps_mask, morphology.square(5))
+        # Erode all edges, including gaps
+        eroded_mask = morphology.binary_erosion(binary_mask, morphology.square(3))
 
-    # Erode all edges, including gaps
-    eroded_mask = morphology.binary_erosion(binary_mask, morphology.square(3))
-
-    # Add back in data values from dilated large gaps mask and small gaps mask
-    eroded_raster_data = np.where(eroded_mask == 1, raster_data, no_data_value)
-    eroded_raster_data[~dilated_large_gaps_mask & (eroded_mask == 0)] = raster_data[~dilated_large_gaps_mask & (eroded_mask == 0)]
-    eroded_raster_data[small_gaps_mask == 1] = raster_data[small_gaps_mask == 1]
-
-    # Create a new GeoTIFF file for the eroded raster data
+        # Add back in data values from dilated large gaps mask and small gaps mask
+        eroded_chunk = np.where(eroded_mask == 1, chunk_data, no_data_value)
+        eroded_chunk[~dilated_large_gaps_mask & (eroded_mask == 0)] = chunk_data[~dilated_large_gaps_mask & (eroded_mask == 0)]
+        eroded_chunk[small_gaps_mask == 1] = chunk_data[small_gaps_mask == 1]
+        
+        # Remove buffer
+        buffer_rows_to_remove = buffer_size if start_row != 0 else 0
+        final_eroded_chunk = eroded_chunk[buffer_rows_to_remove : buffer_rows_to_remove + (end_row - start_row), :]
+        
+        # Store the eroded chunk data in the resultant array
+        eroded_data[start_row:end_row, :] = final_eroded_chunk
+    
+    # Save the eroded data as a TIFF (this can be modified based on requirements)
     driver = gdal.GetDriverByName('GTiff')
-    eroded_uncertainty_tiff = driver.Create(output_dir +'/'+ 'eroded_uncertainty_tiff.tif', dataset.RasterXSize, dataset.RasterYSize, 1, band.DataType,
-                                   options=["COMPRESS=LZW", "PREDICTOR=2"])
+    options = ["COMPRESS=LZW"]
+    eroded_dataset = driver.Create(output_dir + '/eroded_elevation_tiff.tif', raster_width, raster_height, 1, band.DataType, options=options)
+    eroded_dataset.SetGeoTransform(dataset.GetGeoTransform())
+    eroded_dataset.SetProjection(dataset.GetProjection())
+    eroded_band = eroded_dataset.GetRasterBand(1)
+    eroded_band.WriteArray(eroded_data)
+    eroded_band.SetNoDataValue(no_data_value)
+    eroded_band.FlushCache()
 
-    # Copy the geotransform and projection from the input raster to the output raster
-    eroded_uncertainty_tiff.SetGeoTransform(dataset.GetGeoTransform())
-    eroded_uncertainty_tiff.SetProjection(dataset.GetProjection())
-
-    # Write the eroded raster data to the output file
-    output_band = eroded_uncertainty_tiff.GetRasterBand(1)
-    output_band.WriteArray(eroded_raster_data)
-
-    # Set the same NoDataValue in the output raster as in the input raster
-    output_band.SetNoDataValue(no_data_value)
-
-    # Close the datasets
-    eroded_uncertainty_tiff.FlushCache()
-    eroded_uncertainty_tiff = None
+    # Cleanup
     dataset = None
-    return output_dir +'/'+ 'eroded_uncertainty_tiff.tif'
+    eroded_dataset = None
+    print('***elevation band erosion complete***')
+    return output_dir + '/eroded_elevation_tiff.tif'
 
 def replace_bag_bands(input_bag, output_dir, eroded_bag_file):
     # Copy the original BAG file to a new file with _eroded suffix
@@ -156,30 +127,47 @@ def replace_bag_bands(input_bag, output_dir, eroded_bag_file):
 
     # Open the eroded BAG file in read-write mode
     with h5py.File(eroded_bag_file, "r+") as bag:
-        # Open the elevation and uncertainty GeoTIFF files
-        eroded_elevation_tiff = erode_outer_edge_elevation(input_bag, output_dir)
-        eroded_uncertainty_tiff = erode_outer_edge_uncertainty(input_bag, output_dir)
+        # Open the elevation GeoTIFF file
+        eroded_elevation_tiff = erode_outer_edge_elevation_chunked(input_bag, output_dir)
         elevation_ds = gdal.Open(eroded_elevation_tiff, gdal.GA_ReadOnly)
-        uncertainty_ds = gdal.Open(eroded_uncertainty_tiff, gdal.GA_ReadOnly)
-
-        # Read the elevation and uncertainty data as numpy arrays
+        
+        # Read the elevation data as a numpy array
         elevation = elevation_ds.GetRasterBand(1).ReadAsArray()
-        uncertainty = uncertainty_ds.GetRasterBand(1).ReadAsArray()
+        no_data_value = elevation_ds.GetRasterBand(1).GetNoDataValue()
 
-        # Flip the elevation and uncertainty arrays along the vertical axis
+        # Create a binary mask based on the NoDataValue
+        binary_mask = np.where(elevation != no_data_value, 1, 0).astype(np.uint8)
+
+        # Flip the elevation array along the vertical axis
         elevation = np.flipud(elevation)
-        uncertainty = np.flipud(uncertainty)
 
-        # Replace the elevation and uncertainty data in the BAG file
+        # Replace the elevation data in the BAG file
         bag["/BAG_root/elevation"][:] = elevation
-        bag["/BAG_root/uncertainty"][:] = uncertainty
+
+        # Open the uncertainty GeoTIFF file
+        full_uncertainty_tiff = bag_to_uncertainty_geotiff(input_bag, output_dir)
+        uncertainty_ds = gdal.Open(full_uncertainty_tiff, gdal.GA_ReadOnly)
+        
+        # Read the uncertainty data as a numpy array
+        uncertainty = uncertainty_ds.GetRasterBand(1).ReadAsArray()
+        
+        # Filter the uncertainty data using the binary mask
+        filtered_uncertainty = np.where(binary_mask == 1, uncertainty, no_data_value)
+        
+        # Flip the filtered uncertainty array along the vertical axis
+        filtered_uncertainty = np.flipud(filtered_uncertainty)
+
+        # Replace the uncertainty data in the BAG file
+        bag["/BAG_root/uncertainty"][:] = filtered_uncertainty
 
         # Close the elevation and uncertainty datasets
         elevation_ds = None
         uncertainty_ds = None
 
 def remove_intermediate_files(output_dir):
-    files_to_remove = ['full_elevation_tiff.tif', 'full_uncertainty_tiff.tif', 'eroded_elevation_tiff.tif', 'eroded_uncertainty_tiff.tif']
+    print('***removing intermediate files***')
+
+    files_to_remove = ['full_elevation_tiff.tif', 'full_uncertainty_tiff.tif', 'eroded_elevation_tiff.tif']
 
     for file in files_to_remove:
         file_path = os.path.join(output_dir, file)
