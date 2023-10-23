@@ -1,25 +1,30 @@
-# Bathy_edge_erosion
-Erodes one grid cell on all edges, but retains small interior gaps - say goodbye to any edge fliers in your CUBE-generated bathymetric grid. 
+# Erode Raster
 
-This script processes bathymetry rasters created using the CUBE algorithm from Multibeam Echosounder (MBES) data to remove potential edge fliers. The algorithm erodes the edges of large interior gaps while preserving small gaps in the raster data. This is achieved by performing the following steps:
+A Python script that erodes one grid cell on all edges but retains small interior gaps. This is particularly useful for removing edge fliers in bathymetric grids generated using the CUBE algorithm from Multibeam Echosounder (MBES) data.
 
-1. Read the input bathymetry raster (at this point, it only works with geotiffs), identifying the NoDataValue pixels.
+## How it Works
 
-2. Create a binary mask based on the NoDataValue pixels.
+The algorithm performs the following steps to process the bathymetry rasters:
 
-3. Dilate the binary mask and subtract it from the original binary mask, leaving only the eroded edges.
+1. Read the input bathymetry raster (currently supports BAG files).
+2. Identify the NoDataValue pixels in the raster.
+3. Create a binary mask based on the NoDataValue pixels.
+4. Perform morphological dilation on the binary mask and subtract it from the original binary mask, leaving only the eroded edges.
+5. Fill all gaps in the binary mask and compute the area of each gap.
+6. Identify large gaps (those with an area larger than the specified minimum gap size) and create a separate mask for them.
+7. Erode the edges of the large gaps mask.
+8. Combine the eroded large gaps mask with the eroded edges mask to create a combined mask.
+9. Apply the combined mask to the input raster data, replacing the eroded edges with NoDataValue pixels.
+10. Save the modified raster data to a new BAG file with LZW compression.
 
-4. Fill all gaps in the binary mask and compute the area of each gap.
+## Customization
 
-5. Identify large gaps (those with an area larger than the specified minimum gap size) and create a separate mask for them.
+The script is designed to be user-friendly and easily customizable by adjusting parameters such as the minimum gap size. The output raster will have the edges of large gaps eroded by one pixel, while preserving the smaller gaps, thus reducing the potential for edge fliers in the bathymetry data.
 
-6. Erode the edges of the large gaps mask.
+## Usage
 
-7. Combine the eroded large gaps mask with the eroded edges mask to create a combined mask.
-
-8. Apply the combined mask to the input raster data, replacing the eroded edges with NoDataValue pixels.
-
-9. Save the modified raster data to a new GeoTIFF file with LZW compression.
+The script can be run from the command line with the following syntax:
+python erode_bag_functions.py <input_bag> <output_dir>
 
 Note: This script is designed to be easily customizable by adjusting parameters such as the minimum gap size. The output raster will have the edges of large gaps eroded by one pixel, while preserving the smaller gaps, thus reducing the potential for edge fliers in the bathymetry data.
 
